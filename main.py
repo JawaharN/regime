@@ -24,6 +24,7 @@ import logging
 import signal
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from core.config import load_config, project_root
@@ -221,6 +222,7 @@ def _run_one_iteration(cfg, broker, tracker, executor, generators,  # noqa: ANN0
         raise SystemExit(2)
 
     tracker.refresh(equity_hint=account.equity)
+    remaining_cash = account.cash
 
     for sym, gen in generators.items():
         try:
@@ -231,7 +233,10 @@ def _run_one_iteration(cfg, broker, tracker, executor, generators,  # noqa: ANN0
                     logger.info("[dry-run] %s %s w=%.3f stop=%s — not submitted",
                                 sym, sig.side, sig.target_weight, sig.stop_loss)
                     continue
-                result = executor.submit(sig, account, current_price=price)
+                iteration_account = replace(account, cash=remaining_cash)
+                result = executor.submit(sig, iteration_account, current_price=price)
+                if result.placed and result.signed_qty > 0:
+                    remaining_cash = max(0.0, remaining_cash - result.estimated_notional)
                 logger.info("[%s] regime=%s conf=%.2f → %s",
                             sym, sig.regime, sig.confidence, result.reason)
         except Exception:  # noqa: BLE001

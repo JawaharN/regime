@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -349,3 +350,81 @@ def test_cash_cap_blocks_too_small_buy(tmp_path):
     assert not result.placed
     assert "insufficient cash" in result.reason
     fake_client.orders.place_market.assert_not_called()
+
+
+def test_execution_result_reports_submitted_notional(tmp_path):
+    _, executor, _, risk = _make_adapter_and_executor(
+        [], cash=1_000.0, tmp_path=tmp_path, symbol_map={"AAPL": "AAPL_US_EQ"}
+    )
+    from core.risk_manager import AccountSnapshot
+    risk.check_portfolio(AccountSnapshot(100_000.0, 1_000.0,
+                                          datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc)))
+
+    sig = Signal(symbol="AAPL", side="BUY", target_weight=0.5,
+                 confidence=0.9, regime="bull", reason="test")
+    acct = AccountInfo(equity=100_000.0, cash=1_000.0, invested=0.0,
+                       currency="USD", timestamp=datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc))
+
+    result = executor.submit(sig, acct, current_price=500.0)
+    assert result.placed
+    assert result.signed_qty == 1.9
+    assert result.estimated_notional == 950.0
+
+
+def test_market_order_throttle_waits_at_limit(caplog):
+    cfg = load_config()
+    fake_t212_cfg = MagicMock()
+    fake_t212_cfg.env = "demo"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
+    fake_client = MagicMock()
+    fake_client.orders.place_market.return_value = MagicMock(id="x")
+    fake_client.account.summary.return_value = MagicMock(total=100000, free=100000, invested=0, currencyCode="USD")
+    fake_client.positions.list.return_value = []
+    fake_client.metadata.instruments.return_value = []
+
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
+        adapter = BrokerAdapter(cfg.broker, symbol_map={"AAPL": "AAPL_US_EQ"}).connect()
+
+    adapter._market_order_timestamps = [1000.0 + i for i in range(50)]
+    fake_clock = SimpleNamespace(now=1050.0)
+
+    def _time_side_effect():
+        return fake_clock.now
+
+    def _sleep_side_effect(seconds: float):
+        fake_clock.now += seconds
+
+    with patch("broker.broker_adapter.time.time", side_effect=_time_side_effect), \
+         patch("broker.broker_adapter.time.sleep", side_effect=_sleep_side_effect) as fake_sleep:
+        adapter.place_market("AAPL", signed_qty=1.0)
+
+    fake_sleep.assert_called_once_with(10.0)
+    assert adapter._market_order_timestamps[-1] == 1060.0
+
+
+def test_market_order_throttle_allows_immediate_submit():
+    cfg = load_config()
+    fake_t212_cfg = MagicMock()
+    fake_t212_cfg.env = "demo"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
+    fake_client = MagicMock()
+    fake_client.orders.place_market.return_value = MagicMock(id="x")
+    fake_client.account.summary.return_value = MagicMock(total=100000, free=100000, invested=0, currencyCode="USD")
+    fake_client.positions.list.return_value = []
+    fake_client.metadata.instruments.return_value = []
+
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
+        adapter = BrokerAdapter(cfg.broker, symbol_map={"AAPL": "AAPL_US_EQ"}).connect()
+
+    adapter._market_order_timestamps = [1000.0 + i for i in range(49)]
+    with patch("broker.broker_adapter.time.time", return_value=1050.0), \
+         patch("broker.broker_adapter.time.sleep") as fake_sleep:
+        adapter.place_market("AAPL", signed_qty=1.0)
+
+    fake_sleep.assert_not_called()

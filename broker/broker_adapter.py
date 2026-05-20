@@ -52,6 +52,7 @@ class BrokerAdapter:
         self._t212_cfg = None
         self.client = None  # type: ignore[assignment]
         self._instrument_cache: list[object] | None = None
+        self._market_order_timestamps: list[float] = []
 
     # ----------------------------------------------------- lifecycle
 
@@ -233,6 +234,27 @@ class BrokerAdapter:
 
     # ----------------------------------------------------- orders
 
+    def _throttle_market_orders(self) -> None:
+        limit = 50
+        window_seconds = 60.0
+        now = time.time()
+        self._market_order_timestamps = [
+            ts for ts in self._market_order_timestamps
+            if now - ts < window_seconds
+        ]
+        if len(self._market_order_timestamps) >= limit:
+            wait = max(0.0, window_seconds - (now - self._market_order_timestamps[0]))
+            if wait > 0:
+                logger.warning("market-order throttle hit (%d/%ss) — waiting %.1fs",
+                               limit, int(window_seconds), wait)
+                time.sleep(wait)
+                now = time.time()
+                self._market_order_timestamps = [
+                    ts for ts in self._market_order_timestamps
+                    if now - ts < window_seconds
+                ]
+        self._market_order_timestamps.append(time.time())
+
     def place_market(self, symbol: str, signed_qty: float):
         """Place a market order. signed_qty: positive = BUY, negative = SELL."""
         if self.client is None:
@@ -241,6 +263,7 @@ class BrokerAdapter:
         t212_symbol = self._to_t212_symbol(symbol)
         qty = self.round_quantity(signed_qty)
         extended_hours = bool(getattr(self.broker_cfg, "market_extended_hours", True))
+        self._throttle_market_orders()
         req = MarketOrderRequest(
             ticker=t212_symbol,
             quantity=qty,

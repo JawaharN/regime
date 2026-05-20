@@ -30,6 +30,8 @@ class ExecutionResult:
     order_id: object | None
     reason: str
     multiplier_applied: float = 1.0
+    signed_qty: float = 0.0
+    estimated_notional: float = 0.0
 
 
 @dataclass
@@ -91,14 +93,19 @@ class OrderExecutor:
         if math.isclose(signed_qty, 0.0, abs_tol=1e-6):
             return ExecutionResult(False, None, "insufficient cash / qty too small", multiplier)
 
+        estimated_notional = abs(signed_qty * current_price)
         try:
             order = self.broker.place_market(signal.symbol, signed_qty=signed_qty)
         except Exception as e:  # noqa: BLE001
             logger.exception("order submission failed for %s", signal.symbol)
-            return ExecutionResult(False, None, f"broker error: {type(e).__name__}", multiplier)
+            return ExecutionResult(False, None, f"broker error: {type(e).__name__}",
+                                   multiplier, signed_qty=signed_qty,
+                                   estimated_notional=estimated_notional)
 
         return ExecutionResult(True, getattr(order, "id", None),
-                               f"placed {signed_qty:+.4f} @ ~{current_price:.2f}", multiplier)
+                               f"placed {signed_qty:+.4f} @ ~{current_price:.2f}",
+                               multiplier, signed_qty=signed_qty,
+                               estimated_notional=estimated_notional)
 
     def submit_bracket_order(self, signal: Signal, account: AccountInfo,
                              current_price: float) -> ExecutionResult:

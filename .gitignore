@@ -24,3 +24,4 @@ logs/
 .vscode/
 .idea/
 .DS_Store
+state/state_snapshot.json

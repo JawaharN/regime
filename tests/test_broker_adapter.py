@@ -127,6 +127,51 @@ def test_account_parses_new_schema():
     assert info.currency == "EUR"
 
 
+def test_position_model_accepts_missing_ticker():
+    from broker.trade212_api import Position
+
+    position = Position.model_validate({
+        "quantity": 2.0,
+        "averagePrice": 100.0,
+        "currentPrice": 110.0,
+        "ppl": 20.0,
+    })
+
+    assert position.ticker is None
+    assert position.quantity == 2.0
+
+
+def test_positions_tolerate_missing_ticker():
+    from broker.trade212_api import Position
+    cfg = load_config().broker
+    fake_t212_cfg = MagicMock()
+    fake_t212_cfg.env = "demo"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
+
+    fake_client = MagicMock()
+    fake_client.positions.list.return_value = [Position.model_validate({
+        "quantity": 2.0,
+        "averagePrice": 100.0,
+        "currentPrice": 110.0,
+        "ppl": 20.0,
+    })]
+
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
+        adapter = BrokerAdapter(cfg).connect()
+        positions = adapter.positions(equity_hint=1_000.0)
+
+    assert len(positions) == 1
+    assert positions[0].symbol == ""
+    assert positions[0].quantity == 2.0
+    assert positions[0].average_price == 100.0
+    assert positions[0].current_price == 110.0
+    assert positions[0].unrealized_pnl == 20.0
+    assert positions[0].weight == pytest.approx(0.22)
+
+
 # ---------- signed quantity from BUY signal ----------
 
 @dataclass

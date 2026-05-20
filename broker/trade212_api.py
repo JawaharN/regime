@@ -99,7 +99,7 @@ class AccountSummary(BaseModel):
 class Position(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    ticker: str
+    ticker: str | None = None
     quantity: float
     averagePrice: float | None = None
     currentPrice: float | None = None

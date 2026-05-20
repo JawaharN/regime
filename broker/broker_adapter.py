@@ -189,7 +189,7 @@ class BrokerAdapter:
             curr = float(getattr(p, "currentPrice", 0.0) or 0.0)
             notional = abs(qty * curr)
             out.append(PositionInfo(
-                symbol=str(getattr(p, "ticker", "")),
+                symbol=str(getattr(p, "ticker", None) or ""),
                 quantity=qty,
                 average_price=float(getattr(p, "averagePrice", 0.0) or 0.0),
                 current_price=curr,

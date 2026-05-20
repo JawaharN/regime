@@ -28,6 +28,7 @@ class StabilityResult:
     unstable: bool
     inferred_regime: str
     persistence_count: int
+    flicker_count: int
     in_transition: bool = False
     size_multiplier: float = 1.0
 
@@ -73,14 +74,15 @@ class RegimeStabilityFilter:
             and 0 < self._candidate_streak < self.min_persistence_bars
         )
 
-        unstable = self._flicker_count() > self.flicker_threshold
+        flicker_count = self._flicker_count()
+        unstable = flicker_count > self.flicker_threshold
         effective_conf = confidence * (self.unstable_confidence_decay if unstable else 1.0)
         size_mult = (1.0 - self.transition_size_cut) if self._in_transition else 1.0
 
         if unstable:
             logger.warning(
                 "regime unstable: window=%s flicker_count=%s inferred=%s actionable=%s",
-                len(self._history), self._flicker_count(), regime, self._current_actionable,
+                len(self._history), flicker_count, regime, self._current_actionable,
             )
 
         return StabilityResult(
@@ -89,6 +91,7 @@ class RegimeStabilityFilter:
             unstable=unstable,
             inferred_regime=regime,
             persistence_count=self._candidate_streak,
+            flicker_count=flicker_count,
             in_transition=self._in_transition,
             size_multiplier=size_mult,
         )

@@ -219,6 +219,8 @@ dashboard:
 
 monitoring:
   dashboard_refresh_seconds: 5
+  dashboard_host: "0.0.0.0"
+  dashboard_port: 8000
   alert_rate_limit_minutes: 15
   log_dir: "logs"
   log_max_bytes: 10485760          # 10 MB

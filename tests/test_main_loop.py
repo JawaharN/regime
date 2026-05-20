@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -104,12 +105,19 @@ def test_single_iteration_smoke(tmp_path: Path, synthetic_ohlcv):
     assert isinstance(result.reason, str)
 
 
-def test_iteration_uses_remaining_cash_budget():
+def test_iteration_uses_remaining_cash_budget(tmp_path: Path):
     from main import _run_one_iteration
 
     cfg = load_config()
     cfg = cfg.model_copy(update={
         "bars": cfg.bars.model_copy(update={"runtime_interval": "1Day"}),
+        "monitoring": cfg.monitoring.model_copy(update={
+            "state_dashboard_path": str(tmp_path / "dashboard.json"),
+        }),
+        "risk": cfg.risk.model_copy(update={
+            "kill_switch_path": str(tmp_path / "kill_switch.block"),
+            "peak_equity_path": str(tmp_path / "peak_equity.json"),
+        }),
     })
 
     broker = MagicMock()
@@ -123,8 +131,18 @@ def test_iteration_uses_remaining_cash_budget():
     broker.account.return_value = account
 
     tracker = MagicMock()
+    tracker.current.return_value = []
     executor = MagicMock()
     executor.risk.check_portfolio.return_value = MagicMock(action="ALLOW", reason="ok")
+    executor.risk.dashboard_status.return_value = {
+        "daily_pnl": 0.0,
+        "daily_drawdown": {"value": "0.0%", "limit": "3%", "ok": True},
+        "from_peak": {"value": "0.0%", "limit": "10%", "ok": True},
+        "kill_switch": False,
+        "halt_lock": False,
+        "peak_equity": 100000.0,
+    }
+    executor.brackets = {}
     executor.submit.side_effect = [
         ExecutionResult(True, "ORD-1", "placed +1.9 @ ~500.00",
                         signed_qty=1.9, estimated_notional=950.0),
@@ -137,8 +155,12 @@ def test_iteration_uses_remaining_cash_budget():
                       regime="bull", confidence=0.9)
     generator_a = MagicMock()
     generator_a.generate.return_value = [sig_a]
+    generator_a.last_state = None
+    generator_a.last_stability = None
     generator_b = MagicMock()
     generator_b.generate.return_value = [sig_b]
+    generator_b.last_state = None
+    generator_b.last_stability = None
     generators = {"AAPL": generator_a, "MSFT": generator_b}
 
     bars = pd.DataFrame({"close": [500.0]})
@@ -149,6 +171,7 @@ def test_iteration_uses_remaining_cash_budget():
     second_account = executor.submit.call_args_list[1].args[1]
     assert first_account.cash == 1_000.0
     assert second_account == replace(account, cash=50.0)
+    assert json.loads((tmp_path / "dashboard.json").read_text())["system"]["api"] == "ok"
 
 
 

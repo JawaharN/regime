@@ -28,7 +28,7 @@ pytest -q
 2. **`data/`** — feature engineering (causal, z-scored) + market data loader
 3. **`broker/`** — Trade212 adapter, order executor (bracket emulation), position tracker
 4. **`backtest/`** — walk-forward + allocation-math backtester, metrics, benchmarks, stress tests
-5. **`monitoring/`** — rotating JSON logging, alerts, performance tracker, Rich terminal dashboard
+5. **`monitoring/`** — rotating JSON logging, alerts, performance tracker, LAN-accessible HTML dashboard
 6. **`main.py`** — CLI entry point + daily main loop
 
 ## How it works
@@ -90,12 +90,18 @@ Flags: `--paper` (the only supported mode), `--dry-run` (no orders), `--iteratio
 (0 = run forever), `--poll-seconds N`. SIGINT/SIGTERM trigger a clean shutdown that
 writes `state/state_snapshot.json` and never closes positions.
 
-### `dashboard` — Rich terminal dashboard
+### `dashboard` — LAN-accessible HTML dashboard
 
 ```bash
-python main.py dashboard                             # refresh until interrupted
-python main.py dashboard --iterations 1              # render once, then exit
+python main.py dashboard                             # serve on 0.0.0.0:8000 by default
+python main.py dashboard --host 0.0.0.0 --port 8000 # explicit LAN bind
+python main.py dashboard --host 127.0.0.1 --port 8080
 ```
+
+Open it locally at `http://127.0.0.1:8000` or from another PC on the same network at
+`http://192.168.2.40:8000`.
+
+If another PC cannot connect, allow the chosen port through the machine firewall.
 
 
 ## Non-negotiable rules

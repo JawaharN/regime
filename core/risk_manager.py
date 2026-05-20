@@ -135,6 +135,27 @@ class RiskManager:
 
         return RiskDecision("ALLOW", 1.0, "ok")
 
+    def dashboard_status(self, snap: AccountSnapshot) -> dict:
+        peak = self._peak_equity or snap.equity
+        daily_pnl = self._daily_pnl_pct(snap)
+        drawdown_from_peak = snap.equity / peak - 1.0 if peak else 0.0
+        return {
+            "daily_pnl": daily_pnl if daily_pnl is not None else 0.0,
+            "daily_drawdown": {
+                "value": f"{abs(min(daily_pnl or 0.0, 0.0)):.1%}",
+                "limit": f"{self.cfg.daily_drawdown_halt_pct:.0%}",
+                "ok": (daily_pnl or 0.0) > -self.cfg.daily_drawdown_halt_pct,
+            },
+            "from_peak": {
+                "value": f"{abs(min(drawdown_from_peak, 0.0)):.1%}",
+                "limit": f"{self.cfg.total_drawdown_kill_pct:.0%}",
+                "ok": drawdown_from_peak > -self.cfg.total_drawdown_kill_pct,
+            },
+            "kill_switch": self.kill_switch_armed(),
+            "halt_lock": self.halt_lock_armed(),
+            "peak_equity": peak,
+        }
+
     def check_trade(self, signal, snap: AccountSnapshot, positions: list,  # noqa: ANN001
                     stop_distance_pct: float | None = None) -> RiskDecision:
         """Legacy pre-trade validation. Returns ALLOW, REDUCE, or BLOCK."""

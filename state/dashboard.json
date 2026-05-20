@@ -1,0 +1,102 @@
+{
+  "updated_at": "2026-05-20T14:42:18.674139+00:00",
+  "regime": {
+    "symbol": "GOOGL",
+    "label": "bear",
+    "probability": 0.9999999999975979,
+    "consecutive_bars": 1,
+    "flicker_count": 0,
+    "vol_rank": 4
+  },
+  "portfolio": {
+    "equity": 4988.94,
+    "daily_pnl": 0.0,
+    "allocation": 0,
+    "leverage": 0,
+    "cash": 4988.94,
+    "buying_power": 4988.94
+  },
+  "positions": [],
+  "recent_signals": [
+    {
+      "time": "14:42",
+      "symbol": "SPY",
+      "action": "BUY",
+      "reason": "low-vol bull: full allocation with leverage"
+    },
+    {
+      "time": "14:42",
+      "symbol": "AAPL",
+      "action": "BUY",
+      "reason": "mid-vol: trend confirmed"
+    },
+    {
+      "time": "14:42",
+      "symbol": "MSFT",
+      "action": "BUY",
+      "reason": "high-vol defensive: reduced exposure, tight stop"
+    },
+    {
+      "time": "14:42",
+      "symbol": "AMZN",
+      "action": "BUY",
+      "reason": "mid-vol: trend confirmed"
+    },
+    {
+      "time": "14:42",
+      "symbol": "GOOGL",
+      "action": "BUY",
+      "reason": "mid-vol: trend confirmed"
+    },
+    {
+      "time": "14:42",
+      "symbol": "NVDA",
+      "action": "BUY",
+      "reason": "high-vol defensive: reduced exposure, tight stop"
+    },
+    {
+      "time": "14:42",
+      "symbol": "META",
+      "action": "BUY",
+      "reason": "high-vol defensive: reduced exposure, tight stop"
+    },
+    {
+      "time": "14:42",
+      "symbol": "TSLA",
+      "action": "BUY",
+      "reason": "low-vol bull: full allocation with leverage"
+    },
+    {
+      "time": "14:42",
+      "symbol": "AMD",
+      "action": "BUY",
+      "reason": "high-vol defensive: reduced exposure, tight stop"
+    },
+    {
+      "time": "14:42",
+      "symbol": "NFLX",
+      "action": "BUY",
+      "reason": "mid-vol: no trend \u2192 reduced"
+    }
+  ],
+  "risk_status": {
+    "daily_drawdown": {
+      "value": "0.0%",
+      "limit": "3%",
+      "ok": true
+    },
+    "from_peak": {
+      "value": "1.0%",
+      "limit": "10%",
+      "ok": true
+    }
+  },
+  "system": {
+    "data": "ok",
+    "api": "ok",
+    "hmm": "ok",
+    "mode": "DRY_RUN",
+    "halt_lock": "clear"
+  },
+  "kill_switch": false
+}

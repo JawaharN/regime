@@ -6,7 +6,7 @@ Subcommands:
   backtest     — walk-forward backtest (--compare benchmarks, --stress-test)
   broker-test  — Trade212 demo connection smoke test
   run          — start the daily main loop (--dry-run, --paper, --dashboard)
-  dashboard    — launch the Rich terminal dashboard
+  dashboard    — launch the HTML dashboard server
 
 The loop runs on a 1-Day cadence: per bar it reads the regime (forward-only),
 filters for stability, generates vol-tier signals, validates them through the
@@ -26,6 +26,7 @@ import sys
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 
 from core.config import load_config, project_root
 
@@ -109,10 +110,13 @@ def _cmd_broker_test(args: argparse.Namespace) -> int:
 
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
-    from monitoring.dashboard import run_dashboard
-    return run_dashboard(cfg.monitoring.state_dashboard_path,
-                         refresh_seconds=cfg.monitoring.dashboard_refresh_seconds,
-                         iterations=args.iterations)
+    from monitoring.dashboard import run_dashboard_server
+    host = args.host or cfg.monitoring.dashboard_host
+    port = args.port or cfg.monitoring.dashboard_port
+    return run_dashboard_server(cfg.monitoring.state_dashboard_path,
+                                host=host,
+                                port=port,
+                                refresh_seconds=cfg.monitoring.dashboard_refresh_seconds)
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -214,8 +218,8 @@ def _run_one_iteration(cfg, broker, tracker, executor, generators,  # noqa: ANN0
         logger.exception("broker.account() failed: %s", e)
         return
 
-    risk_dec = executor.risk.check_portfolio(AccountSnapshot(
-        account.equity, account.cash, account.timestamp))
+    account_snap = AccountSnapshot(account.equity, account.cash, account.timestamp)
+    risk_dec = executor.risk.check_portfolio(account_snap)
     logger.info("portfolio check: %s (%s)", risk_dec.action, risk_dec.reason)
     if risk_dec.action == "KILL":
         logger.critical("kill switch armed during loop — exiting")
@@ -223,24 +227,51 @@ def _run_one_iteration(cfg, broker, tracker, executor, generators,  # noqa: ANN0
 
     tracker.refresh(equity_hint=account.equity)
     remaining_cash = account.cash
+    recent_signals: list[dict] = []
+    data_ok = True
+    hmm_ok = False
 
     for sym, gen in generators.items():
         try:
             bars = latest_bars(sym, interval=cfg.bars.runtime_interval, n_bars=400)
             for sig in gen.generate(sym, bars):
+                hmm_ok = True
                 price = float(bars["close"].iloc[-1])
+                signal_row = {
+                    "time": account.timestamp.astimezone(timezone.utc).strftime("%H:%M"),
+                    "symbol": sym,
+                    "action": sig.side,
+                    "reason": sig.reason,
+                }
                 if dry_run:
                     logger.info("[dry-run] %s %s w=%.3f stop=%s — not submitted",
                                 sym, sig.side, sig.target_weight, sig.stop_loss)
+                    recent_signals.append(signal_row)
                     continue
                 iteration_account = replace(account, cash=remaining_cash)
                 result = executor.submit(sig, iteration_account, current_price=price)
+                signal_row["action"] = result.reason
+                recent_signals.append(signal_row)
                 if result.placed and result.signed_qty > 0:
                     remaining_cash = max(0.0, remaining_cash - result.estimated_notional)
                 logger.info("[%s] regime=%s conf=%.2f → %s",
                             sym, sig.regime, sig.confidence, result.reason)
         except Exception:  # noqa: BLE001
+            data_ok = False
             logger.exception("iteration failed for %s", sym)
+
+    _write_dashboard_state(
+        cfg,
+        account=account,
+        tracker=tracker,
+        executor=executor,
+        generators=generators,
+        account_snap=account_snap,
+        recent_signals=recent_signals,
+        data_ok=data_ok,
+        hmm_ok=hmm_ok,
+        dry_run=dry_run,
+    )
 
 
 # -------------------------------------------------- helpers
@@ -252,6 +283,95 @@ def _configure_logging(log_cfg, monitoring_cfg=None) -> None:  # noqa: ANN001
     if monitoring_cfg is not None:
         from monitoring.logger import setup_rotating_logs
         setup_rotating_logs(monitoring_cfg, log_cfg.redact_env_keys)
+
+
+def _select_dashboard_regime(generators: dict) -> dict:
+    states = []
+    for sym, gen in generators.items():
+        state = getattr(gen, "last_state", None)
+        if state is None:
+            continue
+        stability = getattr(gen, "last_stability", None)
+        states.append((sym, state, stability))
+    if not states:
+        return {}
+    states.sort(key=lambda item: (bool(item[1].is_confirmed), item[1].probability), reverse=True)
+    sym, state, stability = states[0]
+    return {
+        "symbol": sym,
+        "label": state.label,
+        "probability": state.probability,
+        "consecutive_bars": state.consecutive_bars,
+        "flicker_count": getattr(stability, "flicker_count", 0),
+        "vol_rank": state.state_id,
+    }
+
+
+
+def _serialize_dashboard_positions(tracker, executor) -> list[dict]:  # noqa: ANN001
+    rows = []
+    for pos in tracker.current():
+        denominator = abs(pos.quantity * pos.average_price)
+        upnl_pct = (pos.unrealized_pnl / denominator) if denominator > 0 else 0.0
+        bracket = executor.brackets.get(pos.symbol)
+        rows.append({
+            "symbol": pos.symbol,
+            "side": "LONG" if pos.quantity > 0 else "FLAT",
+            "entry": pos.average_price,
+            "current": pos.current_price,
+            "unrealized_pnl": pos.unrealized_pnl,
+            "unrealized_pnl_pct": upnl_pct,
+            "stop": bracket.stop_loss if bracket and bracket.stop_loss is not None else 0,
+            "holding_bars": 0,
+        })
+    return rows
+
+
+
+def _build_dashboard_state(cfg, account, tracker, executor, generators, account_snap,  # noqa: ANN001
+                           recent_signals: list[dict], data_ok: bool,
+                           hmm_ok: bool, dry_run: bool) -> dict:
+    risk_status = executor.risk.dashboard_status(account_snap)
+    positions = _serialize_dashboard_positions(tracker, executor)
+    allocation = sum(abs(pos.weight) for pos in tracker.current())
+    return {
+        "updated_at": account.timestamp.isoformat(),
+        "regime": _select_dashboard_regime(generators),
+        "portfolio": {
+            "equity": account.equity,
+            "daily_pnl": risk_status["daily_pnl"],
+            "allocation": allocation,
+            "leverage": allocation,
+            "cash": account.cash,
+            "buying_power": account.cash,
+        },
+        "positions": positions,
+        "recent_signals": recent_signals[-10:],
+        "risk_status": {
+            "daily_drawdown": risk_status["daily_drawdown"],
+            "from_peak": risk_status["from_peak"],
+        },
+        "system": {
+            "data": "ok" if data_ok else "degraded",
+            "api": "ok",
+            "hmm": "ok" if hmm_ok else "idle",
+            "mode": "DRY_RUN" if dry_run else "PAPER",
+            "halt_lock": "armed" if risk_status["halt_lock"] else "clear",
+        },
+        "kill_switch": risk_status["kill_switch"],
+    }
+
+
+
+def _write_dashboard_state(cfg, **kwargs) -> None:  # noqa: ANN001
+    try:
+        payload = _build_dashboard_state(cfg, **kwargs)
+        path = Path(cfg.monitoring.state_dashboard_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, default=str))
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to write dashboard state")
+
 
 
 def _write_state_snapshot(cfg, tracker, risk) -> None:  # noqa: ANN001
@@ -322,7 +442,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.set_defaults(func=_cmd_run)
 
     d = sub.add_parser("dashboard")
-    d.add_argument("--iterations", type=int, default=0)
+    d.add_argument("--host", default=None,
+                   help="HTTP bind host (default: monitoring.dashboard_host or 0.0.0.0)")
+    d.add_argument("--port", type=int, default=None,
+                   help="HTTP port (default: monitoring.dashboard_port or 8000)")
     d.set_defaults(func=_cmd_dashboard)
     return p
 

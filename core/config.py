@@ -190,6 +190,8 @@ class DashboardCfg(BaseModel):
 
 class MonitoringCfg(BaseModel):
     dashboard_refresh_seconds: int = 5
+    dashboard_host: str = "0.0.0.0"
+    dashboard_port: int = 8000
     alert_rate_limit_minutes: int = 15
     log_dir: str = "logs"
     log_max_bytes: int = 10_485_760

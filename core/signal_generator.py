@@ -28,6 +28,7 @@ class SignalGenerator:
         self.orchestrator = orchestrator
         self.features_cfg = features_cfg
         self.last_state: RegimeState | None = None
+        self.last_stability = None
 
     def generate(self, symbol: str, bars: pd.DataFrame) -> list[Signal]:
         """Bars → features → forward inference → stability → orchestrator."""
@@ -47,6 +48,7 @@ class SignalGenerator:
         state.is_confirmed = not stab.in_transition
         state.consecutive_bars = stab.persistence_count
         self.last_state = state
+        self.last_stability = stab
 
         return self.orchestrator.generate_signals(
             symbol, bars, state, is_flickering=stab.unstable,

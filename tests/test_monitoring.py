@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from core.config import load_config
-from monitoring.alerts import AlertBus, FileAlertSink, StdoutAlertSink
+from monitoring.alerts import AlertBus, FileAlertSink
 from monitoring.logger import RedactFilter, build_logger
 from monitoring.performance import PerformanceTracker
 

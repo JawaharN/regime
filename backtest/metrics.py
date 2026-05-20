@@ -109,7 +109,7 @@ def slice_by_confidence(returns: pd.Series, confidence: pd.Series,
                         buckets: list[float]) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     edges = list(buckets)
-    for lo, hi in zip(edges[:-1], edges[1:]):
+    for lo, hi in zip(edges[:-1], edges[1:], strict=False):
         mask = (confidence >= lo) & (confidence < hi)
         r = returns[mask]
         if r.empty:

@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import pytest
 
 from core.config import load_config
@@ -34,11 +33,11 @@ def test_single_iteration_smoke(tmp_path: Path, synthetic_ohlcv):
     from broker.broker_adapter import AccountInfo, BrokerAdapter
     from broker.order_executor import OrderExecutor
     from broker.position_tracker import PositionTracker
-    from data.feature_engineering import build_features, feature_spec_from_cfg
     from core.hmm_engine import HMMEngine
     from core.regime_stability import RegimeStabilityFilter
-    from core.risk_manager import AccountSnapshot, RiskManager
     from core.regime_strategies import StrategyOrchestrator
+    from core.risk_manager import AccountSnapshot, RiskManager
+    from data.feature_engineering import build_features, feature_spec_from_cfg
 
     cfg = load_config()
     risk_cfg = cfg.risk.model_copy(update={
@@ -54,7 +53,9 @@ def test_single_iteration_smoke(tmp_path: Path, synthetic_ohlcv):
 
     # Mocked broker
     fake_t212_cfg = MagicMock()
-    fake_t212_cfg.env = "demo"; fake_t212_cfg.api_key = "k"; fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.env = "demo"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
     fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
     fake_client = MagicMock()
     fake_client.account.summary.return_value = MagicMock(
@@ -63,8 +64,8 @@ def test_single_iteration_smoke(tmp_path: Path, synthetic_ohlcv):
     fake_client.positions.list.return_value = []
     fake_client.orders.place_market.return_value = MagicMock(id="ORD-1")
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client", return_value=fake_client):
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
         broker = BrokerAdapter(cfg.broker).connect()
     tracker = PositionTracker(broker)
     executor = OrderExecutor(broker, risk, tracker)
@@ -110,7 +111,7 @@ def test_clean_shutdown_on_signal(monkeypatch, capsys):
     # Patch broker + risk + market_data to no-op so we exercise the loop control.
     with patch("main._run_one_iteration") as one_iter, \
          patch("broker.broker_adapter.BrokerAdapter.connect") as fake_connect, \
-         patch("broker.broker_adapter.BrokerAdapter.close") as fake_close:
+         patch("broker.broker_adapter.BrokerAdapter.close"):
         fake_adapter = MagicMock()
         fake_connect.return_value = fake_adapter
         # Stub the HMM model load so we don't need a real file.

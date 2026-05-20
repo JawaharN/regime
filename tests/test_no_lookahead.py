@@ -9,8 +9,8 @@ If implementation is causal, (a) and (b) agree at row t.
 from __future__ import annotations
 
 from core.config import load_config
-from data.feature_engineering import build_features, feature_spec_from_cfg
 from core.hmm_engine import HMMEngine
+from data.feature_engineering import build_features, feature_spec_from_cfg
 
 
 def test_forward_inference_is_causal(synthetic_ohlcv):

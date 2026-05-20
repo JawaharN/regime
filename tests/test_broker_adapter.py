@@ -12,9 +12,8 @@ from broker.broker_adapter import AccountInfo, BrokerAdapter, PositionInfo
 from broker.order_executor import OrderExecutor
 from broker.position_tracker import PositionTracker
 from core.config import load_config
-from core.risk_manager import RiskManager
 from core.regime_strategies import Signal
-
+from core.risk_manager import RiskManager
 
 # ---------- demo-mode enforcement ----------
 
@@ -26,8 +25,8 @@ def test_connect_refuses_live_env_when_require_demo():
     fake_t212_cfg.api_key = "k"
     fake_t212_cfg.secret_key = "s"
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client") as fake_client:
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client") as fake_client:
         adapter = BrokerAdapter(cfg)
         with pytest.raises(RuntimeError, match="Refusing to connect"):
             adapter.connect()
@@ -42,8 +41,8 @@ def test_connect_succeeds_in_demo_env():
     fake_t212_cfg.api_key = "k"
     fake_t212_cfg.secret_key = "s"
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client") as fake_client:
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client") as fake_client:
         adapter = BrokerAdapter(cfg)
         adapter.connect()
         fake_client.assert_called_once()
@@ -60,8 +59,8 @@ def test_credentials_not_in_logs(caplog):
     fake_t212_cfg.api_key = "VERY_SECRET_KEY_VALUE"
     fake_t212_cfg.secret_key = "EVEN_MORE_SECRET"
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client"):
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client"):
         adapter = BrokerAdapter(cfg)
         with caplog.at_level(logging.DEBUG, logger="regime_trader.broker"):
             adapter.connect()
@@ -74,11 +73,12 @@ def test_credentials_not_in_logs(caplog):
 
 def test_account_parses_legacy_schema():
     """Older Trade212 accounts return total / free / invested / currencyCode."""
-    from trade212_bot.models.account import AccountSummary
+    from broker.trade212_api import AccountSummary
     cfg = load_config().broker
     fake_t212_cfg = MagicMock()
     fake_t212_cfg.env = "demo"
-    fake_t212_cfg.api_key = "k"; fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
     fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
 
     fake_client = MagicMock()
@@ -86,8 +86,8 @@ def test_account_parses_legacy_schema():
         total=10000.0, free=8000.0, invested=2000.0, currencyCode="USD",
     )
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client", return_value=fake_client):
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
         adapter = BrokerAdapter(cfg).connect()
         info = adapter.account()
     assert info.equity == 10000.0
@@ -97,11 +97,12 @@ def test_account_parses_legacy_schema():
 
 def test_account_parses_new_schema():
     """Newer Trade212 accounts return totalValue / cash.availableToTrade / currency."""
-    from trade212_bot.models.account import AccountSummary
+    from broker.trade212_api import AccountSummary
     cfg = load_config().broker
     fake_t212_cfg = MagicMock()
     fake_t212_cfg.env = "demo"
-    fake_t212_cfg.api_key = "k"; fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
     fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
 
     fake_client = MagicMock()
@@ -115,8 +116,8 @@ def test_account_parses_new_schema():
                          "realizedProfitLoss": 0, "unrealizedProfitLoss": 0},
     })
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client", return_value=fake_client):
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
         adapter = BrokerAdapter(cfg).connect()
         info = adapter.account()
     assert info.equity == 1000.0
@@ -150,7 +151,8 @@ def _make_adapter_and_executor(positions: list[_Pos], equity: float = 100_000.0,
 
     fake_t212_cfg = MagicMock()
     fake_t212_cfg.env = "demo"
-    fake_t212_cfg.api_key = "k"; fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
     fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
 
     fake_client = MagicMock()
@@ -160,8 +162,8 @@ def _make_adapter_and_executor(positions: list[_Pos], equity: float = 100_000.0,
     fake_client.positions.list.return_value = []  # we manually populate tracker cache
     fake_client.orders.place_market.return_value = MagicMock(id="ORD-1")
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client", return_value=fake_client):
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
         adapter = BrokerAdapter(cfg.broker).connect()
     tracker = PositionTracker(adapter)
     tracker._cache = [PositionInfo(**p.__dict__) for p in positions]
@@ -212,23 +214,20 @@ def test_sell_signal_becomes_negative_quantity(tmp_path):
     assert abs(req.quantity - (-100.0)) < 1e-6
 
 
-def test_symbol_map_translates_ticker(tmp_path):
+def test_symbol_map_translates_ticker():
     cfg = load_config()
-    risk_cfg = cfg.risk.model_copy(update={
-        "kill_switch_path": str(tmp_path / "k"),
-        "peak_equity_path": str(tmp_path / "p"),
-    })
-    risk = RiskManager(risk_cfg)
     fake_t212_cfg = MagicMock()
-    fake_t212_cfg.env = "demo"; fake_t212_cfg.api_key = "k"; fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.env = "demo"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
     fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
     fake_client = MagicMock()
     fake_client.orders.place_market.return_value = MagicMock(id="x")
     fake_client.account.summary.return_value = MagicMock(total=100000, free=100000, invested=0, currencyCode="USD")
     fake_client.positions.list.return_value = []
 
-    with patch("trade212_bot.config.load_config", return_value=fake_t212_cfg), \
-         patch("trade212_bot.client.Trade212Client", return_value=fake_client):
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
         adapter = BrokerAdapter(cfg.broker, symbol_map={"SAP": "SAPd_EQ"}).connect()
 
     adapter.place_market("SAP", signed_qty=5.0)

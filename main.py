@@ -25,7 +25,6 @@ import signal
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from core.config import load_config, project_root
 
@@ -119,7 +118,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from broker.broker_adapter import BrokerAdapter
     from broker.order_executor import OrderExecutor
     from broker.position_tracker import PositionTracker
-    from core.hmm_engine import HMMEngine
     from core.regime_stability import RegimeStabilityFilter
     from core.regime_strategies import RegimeOrchestrator
     from core.risk_manager import RiskManager

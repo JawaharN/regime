@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.config import load_config
-from data.feature_engineering import build_features, feature_spec_from_cfg
 from core.hmm_engine import HMMEngine
 from core.regime_labeling import label_states
+from data.feature_engineering import build_features, feature_spec_from_cfg
 
 
 def _fit_engine(ohlcv):

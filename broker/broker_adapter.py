@@ -1,4 +1,7 @@
-"""Adapter from regime_trader's interface to trade212_bot.client.Trade212Client.
+"""Adapter from regime_trader's interface to the Trade212 API client.
+
+The Trade212 wire client is `broker.trade212_api.Trade212Client` — vendored
+in-repo, no external broker package.
 
 Enforces demo-only operation: if TRADING212_ENV != "demo" and
 broker.require_demo is True (the default), we refuse to connect.
@@ -7,8 +10,8 @@ Trade212 has no WebSocket trade-fill stream and no native OCO bracket orders;
 those are emulated in `order_executor` / `position_tracker`. Every network call
 goes through a 3-retry exponential-backoff wrapper.
 
-Credentials load from env via trade212_bot.config.load_config(). They are never
-logged — the logger redacts any configured secret value.
+Credentials load from env via `broker.trade212_api.load_config()`. They are
+never logged — the logger redacts any configured secret value.
 """
 
 from __future__ import annotations
@@ -52,8 +55,8 @@ class BrokerAdapter:
     # ----------------------------------------------------- lifecycle
 
     def connect(self):
-        from trade212_bot.client import Trade212Client
-        from trade212_bot.config import load_config as load_t212_cfg
+        from broker.trade212_api import Trade212Client
+        from broker.trade212_api import load_config as load_t212_cfg
 
         self._t212_cfg = load_t212_cfg()
         if self.broker_cfg.require_demo and self._t212_cfg.env != "demo":
@@ -97,6 +100,17 @@ class BrokerAdapter:
                                    type(e).__name__, i + 1, attempts, delay)
                     time.sleep(delay)
         raise RuntimeError(f"broker call failed after {attempts} attempts") from last_exc
+
+    def round_quantity(self, qty: float) -> float:
+        """Truncate an order quantity to Trade212's accepted decimal precision.
+
+        Trade212 rejects quantities with too many decimals ("invalid quantity
+        precision"). We truncate toward zero — never round up — so a sized order
+        can't drift above its intended notional and trip 'insufficient funds'.
+        """
+        precision = getattr(self.broker_cfg, "quantity_precision", 1)
+        factor = 10 ** max(0, precision)
+        return int(qty * factor) / factor
 
     # ----------------------------------------------------- account / positions
 
@@ -175,12 +189,13 @@ class BrokerAdapter:
         """Place a market order. signed_qty: positive = BUY, negative = SELL."""
         if self.client is None:
             raise RuntimeError("BrokerAdapter not connected")
-        from trade212_bot.models.order import MarketOrderRequest
+        from broker.trade212_api import MarketOrderRequest
         t212_symbol = self.symbol_map.get(symbol, symbol)
-        req = MarketOrderRequest(ticker=t212_symbol, quantity=signed_qty)
+        qty = self.round_quantity(signed_qty)
+        req = MarketOrderRequest(ticker=t212_symbol, quantity=qty)
         order = self._retry(self.client.orders.place_market, req)
         logger.info("placed market: symbol=%s qty=%s order_id=%s",
-                    t212_symbol, signed_qty, getattr(order, "id", None))
+                    t212_symbol, qty, getattr(order, "id", None))
         return order
 
     def place_limit(self, symbol: str, signed_qty: float, limit_price: float):
@@ -189,8 +204,9 @@ class BrokerAdapter:
             raise RuntimeError("BrokerAdapter not connected")
         t212_symbol = self.symbol_map.get(symbol, symbol)
         try:
-            from trade212_bot.models.order import LimitOrderRequest
-            req = LimitOrderRequest(ticker=t212_symbol, quantity=signed_qty,
+            from broker.trade212_api import LimitOrderRequest
+            req = LimitOrderRequest(ticker=t212_symbol,
+                                    quantity=self.round_quantity(signed_qty),
                                     limitPrice=limit_price)
             order = self._retry(self.client.orders.place_limit, req)
             logger.info("placed limit: symbol=%s qty=%s @ %.4f order_id=%s",

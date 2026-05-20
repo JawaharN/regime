@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 
 from broker.broker_adapter import AccountInfo, BrokerAdapter, PositionInfo
 from broker.position_tracker import PositionTracker
-from core.risk_manager import AccountSnapshot, RiskManager
 from core.regime_strategies import Signal
+from core.risk_manager import AccountSnapshot, RiskManager
 
 logger = logging.getLogger("regime_trader.executor")
 
@@ -81,6 +81,7 @@ class OrderExecutor:
             return ExecutionResult(False, None, "non-positive price", multiplier)
 
         signed_qty = (delta_weight * account.equity) / current_price
+        signed_qty = self.broker.round_quantity(signed_qty)
         if math.isclose(signed_qty, 0.0, abs_tol=1e-6):
             return ExecutionResult(False, None, "qty too small", multiplier)
 

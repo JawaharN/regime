@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from core.config import load_config
 from backtest import stress_tests
+from core.config import load_config
 
 
 def test_monte_carlo_crash_reports_distribution(synthetic_ohlcv):

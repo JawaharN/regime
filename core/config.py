@@ -2,7 +2,7 @@
 
 Reads `config/settings.yaml` (path overridable via REGIME_TRADER_CONFIG) and
 exposes a pydantic-validated `Config`. Broker credentials are NOT loaded here —
-they live in trade212_bot.config.load_config() and are pulled lazily by the
+they live in broker.trade212_api.load_config() and are pulled lazily by the
 broker adapter, so this module stays usable in tests that never touch the
 network.
 
@@ -175,6 +175,10 @@ class BrokerCfg(BaseModel):
     unfilled_cancel_seconds: int = 30
     retry_attempts: int = 3
     retry_backoff_seconds: float = 2.0
+    # Trade212 rejects order quantities with too many decimal places
+    # ("invalid quantity precision"). Quantities are truncated to this many
+    # decimals before submission. 1 is universally accepted.
+    quantity_precision: int = 1
 
 
 class DashboardCfg(BaseModel):

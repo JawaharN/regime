@@ -22,8 +22,11 @@ rich>=13.7
 schedule>=1.2
 websocket-client>=1.7
 
-# --- Broker (Trade212): reuse local package as an editable install ---
--e /home/jawahar/trading/trade212
+# --- Broker (Trade212): API client is self-contained in broker/trade212_api.py ---
+httpx>=0.27
+
+# --- Market data ---
+tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git
 
 # --- Dev / test ---
 pytest>=8.0

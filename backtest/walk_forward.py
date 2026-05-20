@@ -162,7 +162,7 @@ def run_walk_forward(symbol: str, ohlcv: pd.DataFrame, cfg) -> dict:  # noqa: AN
 
         weights, regimes_out, confs_out = [], [], []
         close_history = ohlcv["close"].loc[: oos_close.index[-1]]
-        for ts, inf in zip(oos_slice.index, path):
+        for ts, inf in zip(oos_slice.index, path, strict=True):
             stab = stability.update(inf.label, inf.confidence)
             actionable = stab.actionable_regime or "neutral"
             close_so_far = close_history.loc[: ts]

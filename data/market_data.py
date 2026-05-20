@@ -7,11 +7,18 @@ columns: open, high, low, close, volume.
 The cache fallback lets paper-trade rehearsals and backtests run on whatever
 history the user already fetched, without a hard network dependency at import
 time. Gaps (weekends / holidays / halts) are tolerated — nothing is back-filled.
+
+Authentication: anonymous tvdatafeed access is heavily rate-capped and returns
+limited history. Set ``TV_SESSIONID`` in ``.env`` (the `sessionid` cookie from a
+logged-in tradingview.com tab) and we exchange it for the websocket auth token
+to lift those limits.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -20,9 +27,57 @@ logger = logging.getLogger("regime_trader.market_data")
 
 REQUIRED_COLS = ("open", "high", "low", "close", "volume")
 
+# tvdatafeed needs the listing exchange, which varies across the universe
+# (e.g. SPY is AMEX-listed, AAPL is NASDAQ). We probe in order and use the
+# first exchange that returns data, so callers never have to know the venue.
+_PROBE_EXCHANGES = ("NASDAQ", "NYSE", "AMEX")
+
+# Resolved TradingView auth tokens, keyed by sessionid (avoids re-scraping).
+_TV_TOKEN_CACHE: dict[str, str] = {}
+
 
 def _cache_path(symbol: str, interval: str) -> Path:
     return Path("data/cache") / f"{symbol}_{interval}.parquet"
+
+
+def _resolve_tv_token(sessionid: str) -> str | None:
+    """Exchange a TradingView ``sessionid`` cookie for the websocket auth token.
+
+    tvdatafeed's username/password sign-in is broken upstream, so we scrape the
+    JWT off the logged-in /chart/ page instead. Returns None if it can't.
+    """
+    if sessionid in _TV_TOKEN_CACHE:
+        return _TV_TOKEN_CACHE[sessionid]
+    try:
+        import requests
+        resp = requests.get(
+            "https://www.tradingview.com/chart/",
+            cookies={"sessionid": sessionid},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        match = re.search(r'"auth_token":"([^"]+)"', resp.text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("could not resolve TV_SESSIONID to an auth token: %s", e)
+        return None
+    if not match:
+        logger.warning("TV_SESSIONID did not yield an auth token — it may be expired")
+        return None
+    _TV_TOKEN_CACHE[sessionid] = match.group(1)
+    return match.group(1)
+
+
+def _apply_tv_session(tv) -> None:  # noqa: ANN001
+    """Authenticate a TvDatafeed instance from TV_SESSIONID, if it is set."""
+    sessionid = os.environ.get("TV_SESSIONID", "").strip()
+    if not sessionid:
+        logger.info("TV_SESSIONID not set — using anonymous tvdatafeed (rate-limited)")
+        return
+    token = _resolve_tv_token(sessionid)
+    if token:
+        tv.token = token
+        logger.info("tvdatafeed authenticated via TV_SESSIONID")
 
 
 def load_history(symbol: str, interval: str = "1d", years: int = 2) -> pd.DataFrame:
@@ -31,11 +86,21 @@ def load_history(symbol: str, interval: str = "1d", years: int = 2) -> pd.DataFr
     try:
         from tvDatafeed import TvDatafeed
         tv = TvDatafeed()
+        _apply_tv_session(tv)
         tv_interval = _to_tv_interval(interval)
         n_bars = int(years * _bars_per_year(interval))
-        df = tv.get_hist(symbol=symbol, exchange="NASDAQ", interval=tv_interval, n_bars=n_bars)
-        if df is None or df.empty:
-            raise RuntimeError("tvdatafeed returned empty frame")
+        df = None
+        for exchange in _PROBE_EXCHANGES:
+            candidate = tv.get_hist(symbol=symbol, exchange=exchange,
+                                    interval=tv_interval, n_bars=n_bars)
+            if candidate is not None and not candidate.empty:
+                logger.info("tvdatafeed: %s found on %s (%d bars)",
+                            symbol, exchange, len(candidate))
+                df = candidate
+                break
+        if df is None:
+            raise RuntimeError(
+                f"tvdatafeed returned no data for {symbol} on any of {_PROBE_EXCHANGES}")
         df = df.rename(columns=str.lower)[list(REQUIRED_COLS)]
         df.index = pd.to_datetime(df.index, utc=True)
         cache.parent.mkdir(parents=True, exist_ok=True)

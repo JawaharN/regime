@@ -1,6 +1,8 @@
 # regime_trader
 
-HMM regime-based, paper-first trading framework. Detects market regime with a Hidden Markov Model (a **volatility classifier**, not a price predictor), routes allocation/strategy by **volatility rank**, enforces hard risk controls independent of the model, supports walk-forward backtesting with explicit allocation math, and integrates with **Trade212 paper trading** via the local `trade212_bot` package.
+HMM regime-based, paper-first trading framework. Detects market regime with a Hidden Markov Model (a **volatility classifier**, not a price predictor), routes allocation/strategy by **volatility rank**, enforces hard risk controls independent of the model, supports walk-forward backtesting with explicit allocation math, and integrates with **Trade212 paper trading** via a vendored, in-repo API client.
+
+This is a **self-contained project** — it has no path dependency on any sibling repo.
 
 > **Not a toy.** Risk layer overrides the model. Paper-only. No look-ahead bias anywhere.
 
@@ -13,7 +15,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# edit .env and fill in TRADING212_API_KEY / TRADING212_SECRET_KEY (demo account)
+# edit .env:
+#   - TRADING212_API_KEY / TRADING212_SECRET_KEY  (demo account)
+#   - TV_SESSIONID  (optional: tradingview.com sessionid cookie for un-throttled data)
 
 pytest -q
 ```
@@ -35,15 +39,64 @@ pytest -q
 
 ## CLI
 
+All commands are subcommands of `python main.py`. A global `--config PATH`
+overrides the config file (defaults to `config/settings.yaml`, or `$REGIME_TRADER_CONFIG`).
+
+### `scaffold` — verify install + config
+
 ```bash
-python main.py scaffold                              # verify install + config
-python main.py train --symbol SPY                    # fit + persist the HMM
-python main.py backtest --symbol SPY --years 6 --compare --stress-test
-python main.py broker-test                           # Trade212 demo account smoke test
-python main.py run --paper --dry-run                 # walk the loop, no orders
-python main.py run --paper                           # live paper main loop
-python main.py dashboard                             # Rich terminal dashboard
+python main.py scaffold
 ```
+
+### `train` — fit + persist the HMM
+
+```bash
+python main.py train --symbol SPY                    # one symbol
+python main.py train --symbols SPY AAPL MSFT         # several
+python main.py train                                 # whole config universe
+```
+
+Models are written to `state/trained_models/<SYMBOL>.pkl`.
+
+### `backtest` — walk-forward backtest
+
+```bash
+python main.py backtest --symbol SPY                          # basic
+python main.py backtest --symbol SPY --years 6                # history window
+python main.py backtest --symbol SPY --years 6 --compare      # vs buy&hold / SMA / random
+python main.py backtest --symbol SPY --stress-test            # monte-carlo crash + gap risk
+python main.py backtest --symbol SPY --years 6 --compare --stress-test
+python main.py backtest --symbols SPY NVDA AMD                # multiple symbols
+```
+
+Flags: `--years N` (default 6), `--start / --end` (date window), `--compare`, `--stress-test`.
+
+### `broker-test` — Trade212 demo smoke test
+
+```bash
+python main.py broker-test                           # prints equity, cash, open positions
+```
+
+### `run` — the daily paper-trading loop
+
+```bash
+python main.py run --paper --dry-run                 # walk the loop, submit no orders
+python main.py run --paper                           # live paper loop (infinite)
+python main.py run --paper --iterations 1            # single pass, then exit
+python main.py run --paper --poll-seconds 300        # seconds between iterations (default 300)
+```
+
+Flags: `--paper` (the only supported mode), `--dry-run` (no orders), `--iterations N`
+(0 = run forever), `--poll-seconds N`. SIGINT/SIGTERM trigger a clean shutdown that
+writes `state/state_snapshot.json` and never closes positions.
+
+### `dashboard` — Rich terminal dashboard
+
+```bash
+python main.py dashboard                             # refresh until interrupted
+python main.py dashboard --iterations 1              # render once, then exit
+```
+
 
 ## Non-negotiable rules
 
@@ -65,9 +118,11 @@ All knobs live in `config/settings.yaml` — universe (10 symbols), bar interval
 HMM/feature settings, vol-tier strategy parameters, risk thresholds, backtest
 windows, broker settings, monitoring/logging.
 
-## Reused: trade212_bot
+## Broker: self-contained Trade212 client
 
-The broker layer wraps `/home/jawahar/trading/trade212` (installed editable):
-authenticated `Trade212Client`, signed-quantity order placement, rate-limit
-handling, paper-mode enforcement. Trade212 has no native OCO or trade-fill
-WebSocket — brackets are emulated and fills are detected by REST polling.
+The entire Trade212 integration lives in `broker/`. `broker/trade212_api.py` is
+the wire client — authenticated httpx transport, rate-limit handling, typed
+order/account/position models, and a `Trade212Client` facade. `broker/broker_adapter.py`
+wraps it with retry/backoff and enforces demo-only (paper) operation. Trade212
+has no native OCO or trade-fill WebSocket — brackets are emulated and fills are
+detected by REST polling.

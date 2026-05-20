@@ -3,7 +3,9 @@
 Default strategy (`label_states`): rank states by mean realized return ascending,
 then spread the ordered states across the configured label sequence. With the
 default labels [crash, bear, neutral, bull, euphoria] and 3 fitted states we use
-indices 0, 2, 4 → [crash, neutral, euphoria].
+indices 0, 2, 4 → [crash, neutral, euphoria]. When BIC selects more states than
+there are label names (n ∈ {6, 7} against the 5 default labels), the spread
+re-uses adjacent labels — two states may share e.g. `bear` — rather than failing.
 
 The final prompt also defines per-`n_components` label sets — exposed as
 `LABEL_SETS` / `label_states_by_count` for human-facing displays. Labels never
@@ -26,15 +28,16 @@ def label_states(state_returns: dict[int, float], label_names: list[str]) -> dic
     """state_returns: {state_id: mean_return}. Returns {state_id: label_name}.
 
     Lowest-mean state gets the worst label, highest-mean the best; intermediate
-    states are spread evenly across the label sequence.
+    states are spread evenly across the label sequence. When there are more
+    states than labels, adjacent states share a label rather than failing.
     """
     if not state_returns:
         return {}
 
     n_states = len(state_returns)
     n_labels = len(label_names)
-    if n_states > n_labels:
-        raise ValueError(f"Have {n_states} states but only {n_labels} label names")
+    if n_labels == 0:
+        raise ValueError("label_names is empty")
 
     ordered = sorted(state_returns.items(), key=lambda kv: kv[1])
 
@@ -44,9 +47,9 @@ def label_states(state_returns: dict[int, float], label_names: list[str]) -> dic
         chosen = [n_labels // 2]
     else:
         step = (n_labels - 1) / (n_states - 1)
-        chosen = [round(i * step) for i in range(n_states)]
+        chosen = [min(n_labels - 1, round(i * step)) for i in range(n_states)]
 
-    return {state_id: label_names[idx] for (state_id, _), idx in zip(ordered, chosen)}
+    return {state_id: label_names[idx] for (state_id, _), idx in zip(ordered, chosen, strict=True)}
 
 
 def label_states_by_count(state_returns: dict[int, float]) -> dict[int, str]:

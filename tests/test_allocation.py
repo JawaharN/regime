@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from core.config import load_config
 from core.allocation import allocate
+from core.config import load_config
 from core.regime_strategies import (
     REGIME_ALIASES,
     StrategyOrchestrator,

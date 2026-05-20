@@ -4,8 +4,10 @@
 # keep working; new keys carry the final-prompt values.
 
 universe:
-  # 8-symbol default universe (final prompt). 8 large-cap equities.
+  # 10-symbol default universe (final prompt). SPY (broad-market ETF) leads,
+  # followed by 9 large-cap equities.
   symbols:
+    - SPY
     - AAPL
     - MSFT
     - AMZN
@@ -14,10 +16,24 @@ universe:
     - META
     - TSLA
     - AMD
-  # TradingView ↔ Trade212 ticker mapping (only needed where they differ).
-  symbol_map: {}
+    - NFLX
+  # TradingView ↔ Trade212 ticker mapping. Trade212 order endpoints reject bare
+  # symbols ("AAPL" -> 404); they need the instrument ticker (e.g. AAPL_US_EQ).
+  # NOTE: SPY (US-domiciled SPDR ETF) is not offered on EU Trade212 accounts, so
+  # it has no mapping — it is used for training/backtesting only, not live orders.
+  symbol_map:
+    AAPL: AAPL_US_EQ
+    MSFT: MSFT_US_EQ
+    AMZN: AMZN_US_EQ
+    GOOGL: GOOGL_US_EQ
+    NVDA: NVDA_US_EQ
+    META: FB_US_EQ
+    TSLA: TSLA_US_EQ
+    AMD: AMD_US_EQ
+    NFLX: NFLX_US_EQ
   # Coarse sector buckets for the risk layer's 30% sector-exposure cap.
   sectors:
+    SPY: index
     AAPL: tech
     MSFT: tech
     AMZN: consumer
@@ -26,6 +42,7 @@ universe:
     META: tech
     TSLA: consumer
     AMD: tech
+    NFLX: consumer
 
 bars:
   # Daily cadence: the loop evaluates once per 1-Day bar close.
@@ -189,6 +206,7 @@ broker:
   unfilled_cancel_seconds: 30
   retry_attempts: 3
   retry_backoff_seconds: 2.0
+  quantity_precision: 1            # decimals kept on order quantity (T212 limit)
 
 dashboard:
   refresh_seconds: 5

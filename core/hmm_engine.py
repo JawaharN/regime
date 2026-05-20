@@ -261,7 +261,7 @@ class HMMEngine:
         return [
             RegimeInference(state=int(s), label=self.state_to_label.get(int(s), "unknown"),
                             confidence=float(c))
-            for s, c in zip(states, confs)
+            for s, c in zip(states, confs, strict=True)
         ]
 
     # ------------------------------------------------------ persistence
@@ -283,7 +283,7 @@ class HMMEngine:
             pickle.dump(payload, f)
 
     @classmethod
-    def load(cls, path: str | Path, hmm_cfg, feature_spec: FeatureSpec) -> "HMMEngine":  # noqa: ANN001
+    def load(cls, path: str | Path, hmm_cfg, feature_spec: FeatureSpec) -> HMMEngine:  # noqa: ANN001
         with open(path, "rb") as f:
             payload = pickle.load(f)
         if payload["feature_spec_hash"] != feature_spec.hash():

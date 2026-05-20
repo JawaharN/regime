@@ -82,8 +82,14 @@ class OrderExecutor:
 
         signed_qty = (delta_weight * account.equity) / current_price
         signed_qty = self.broker.round_quantity(signed_qty)
+        if signed_qty > 0:
+            buffer_pct = getattr(self.broker.broker_cfg, "cash_buffer_pct", 0.02)
+            affordable_cash = max(0.0, account.cash * (1.0 - buffer_pct))
+            requested_notional = signed_qty * current_price
+            if requested_notional > affordable_cash:
+                signed_qty = self.broker.round_quantity(affordable_cash / current_price)
         if math.isclose(signed_qty, 0.0, abs_tol=1e-6):
-            return ExecutionResult(False, None, "qty too small", multiplier)
+            return ExecutionResult(False, None, "insufficient cash / qty too small", multiplier)
 
         try:
             order = self.broker.place_market(signal.symbol, signed_qty=signed_qty)

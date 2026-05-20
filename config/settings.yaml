@@ -22,6 +22,9 @@ universe:
   # NOTE: SPY (US-domiciled SPDR ETF) is not offered on EU Trade212 accounts, so
   # it has no mapping — it is used for training/backtesting only, not live orders.
   symbol_map:
+    # Optional overrides/disambiguation for Trade212 order tickers. The broker
+    # first tries these explicit mappings, then falls back to the Trade212
+    # instruments metadata catalog when a symbol is not listed here.
     AAPL: AAPL_US_EQ
     MSFT: MSFT_US_EQ
     AMZN: AMZN_US_EQ
@@ -206,7 +209,9 @@ broker:
   unfilled_cancel_seconds: 30
   retry_attempts: 3
   retry_backoff_seconds: 2.0
+  market_extended_hours: true      # queue/fill market orders outside regular hours
   quantity_precision: 1            # decimals kept on order quantity (T212 limit)
+  cash_buffer_pct: 0.02            # keep a small cash buffer to avoid rejects
 
 dashboard:
   refresh_seconds: 5

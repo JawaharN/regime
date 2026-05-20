@@ -175,10 +175,12 @@ class BrokerCfg(BaseModel):
     unfilled_cancel_seconds: int = 30
     retry_attempts: int = 3
     retry_backoff_seconds: float = 2.0
+    market_extended_hours: bool = True
     # Trade212 rejects order quantities with too many decimal places
     # ("invalid quantity precision"). Quantities are truncated to this many
     # decimals before submission. 1 is universally accepted.
     quantity_precision: int = 1
+    cash_buffer_pct: float = 0.02
 
 
 class DashboardCfg(BaseModel):

@@ -141,7 +141,8 @@ class _Pos:
 def _make_adapter_and_executor(positions: list[_Pos], equity: float = 100_000.0,
                                 cash: float = 100_000.0,
                                 kill_path="/tmp/kill.block", peak_path="/tmp/peak.json",
-                                tmp_path=None):
+                                tmp_path=None, symbol_map: dict[str, str] | None = None,
+                                instruments: list[object] | None = None):
     cfg = load_config()
     risk_cfg = cfg.risk.model_copy(update={
         "kill_switch_path": str(tmp_path / "kill.block") if tmp_path else kill_path,
@@ -161,10 +162,11 @@ def _make_adapter_and_executor(positions: list[_Pos], equity: float = 100_000.0,
     )
     fake_client.positions.list.return_value = []  # we manually populate tracker cache
     fake_client.orders.place_market.return_value = MagicMock(id="ORD-1")
+    fake_client.metadata.instruments.return_value = instruments or []
 
     with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
          patch("broker.trade212_api.Trade212Client", return_value=fake_client):
-        adapter = BrokerAdapter(cfg.broker).connect()
+        adapter = BrokerAdapter(cfg.broker, symbol_map=symbol_map).connect()
     tracker = PositionTracker(adapter)
     tracker._cache = [PositionInfo(**p.__dict__) for p in positions]
     executor = OrderExecutor(adapter, risk, tracker)
@@ -172,7 +174,9 @@ def _make_adapter_and_executor(positions: list[_Pos], equity: float = 100_000.0,
 
 
 def test_buy_signal_becomes_positive_quantity(tmp_path):
-    adapter, executor, fake_client, risk = _make_adapter_and_executor([], tmp_path=tmp_path)
+    adapter, executor, fake_client, risk = _make_adapter_and_executor(
+        [], tmp_path=tmp_path, symbol_map={"SPY": "SPY_US_EQ"}
+    )
     # Establish a portfolio baseline so risk allows
     from core.risk_manager import AccountSnapshot
     risk.check_portfolio(AccountSnapshot(100_000.0, 100_000.0,
@@ -196,7 +200,9 @@ def test_sell_signal_becomes_negative_quantity(tmp_path):
     # We already own 100 shares (long); strategy wants weight 0 → must sell 100
     existing = _Pos(symbol="SPY", quantity=100.0, average_price=400.0,
                     current_price=500.0, unrealized_pnl=0.0, weight=0.5)
-    adapter, executor, fake_client, risk = _make_adapter_and_executor([existing], tmp_path=tmp_path)
+    adapter, executor, fake_client, risk = _make_adapter_and_executor(
+        [existing], tmp_path=tmp_path, symbol_map={"SPY": "SPY_US_EQ"}
+    )
     from core.risk_manager import AccountSnapshot
     risk.check_portfolio(AccountSnapshot(100_000.0, 50_000.0,
                                           datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc)))
@@ -225,6 +231,7 @@ def test_symbol_map_translates_ticker():
     fake_client.orders.place_market.return_value = MagicMock(id="x")
     fake_client.account.summary.return_value = MagicMock(total=100000, free=100000, invested=0, currencyCode="USD")
     fake_client.positions.list.return_value = []
+    fake_client.metadata.instruments.return_value = []
 
     with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
          patch("broker.trade212_api.Trade212Client", return_value=fake_client):
@@ -233,3 +240,112 @@ def test_symbol_map_translates_ticker():
     adapter.place_market("SAP", signed_qty=5.0)
     req = fake_client.orders.place_market.call_args.args[0]
     assert req.ticker == "SAPd_EQ"
+    assert req.extendedHours is True
+
+
+def test_market_extended_hours_can_be_disabled():
+    cfg = load_config()
+    broker_cfg = cfg.broker.model_copy(update={"market_extended_hours": False})
+    fake_t212_cfg = MagicMock()
+    fake_t212_cfg.env = "demo"
+    fake_t212_cfg.api_key = "k"
+    fake_t212_cfg.secret_key = "s"
+    fake_t212_cfg.base_url = "https://demo.trading212.com/api/v0"
+    fake_client = MagicMock()
+    fake_client.orders.place_market.return_value = MagicMock(id="x")
+    fake_client.account.summary.return_value = MagicMock(total=100000, free=100000, invested=0, currencyCode="USD")
+    fake_client.positions.list.return_value = []
+    fake_client.metadata.instruments.return_value = []
+
+    with patch("broker.trade212_api.load_config", return_value=fake_t212_cfg), \
+         patch("broker.trade212_api.Trade212Client", return_value=fake_client):
+        adapter = BrokerAdapter(broker_cfg, symbol_map={"SAP": "SAPd_EQ"}).connect()
+
+    adapter.place_market("SAP", signed_qty=5.0)
+    req = fake_client.orders.place_market.call_args.args[0]
+    assert req.extendedHours is False
+
+
+def test_metadata_resolves_symbol_without_manual_map():
+    adapter, _, fake_client, _ = _make_adapter_and_executor(
+        [], symbol_map={}, instruments=[MagicMock(ticker="AAPL_US_EQ", shortName="AAPL")]
+    )
+
+    adapter.place_market("AAPL", signed_qty=5.0)
+    req = fake_client.orders.place_market.call_args.args[0]
+    assert req.ticker == "AAPL_US_EQ"
+
+
+def test_metadata_prefers_exact_ticker_before_short_name_matches():
+    adapter, _, fake_client, _ = _make_adapter_and_executor(
+        [],
+        symbol_map={},
+        instruments=[
+            MagicMock(ticker="META", shortName="OTHER"),
+            MagicMock(ticker="FB_US_EQ", shortName="META"),
+            MagicMock(ticker="METAl_EQ", shortName="META"),
+        ],
+    )
+
+    adapter.place_market("META", signed_qty=5.0)
+    req = fake_client.orders.place_market.call_args.args[0]
+    assert req.ticker == "META"
+
+
+def test_ambiguous_metadata_requires_manual_override():
+    adapter, _, _, _ = _make_adapter_and_executor(
+        [],
+        symbol_map={},
+        instruments=[
+            MagicMock(ticker="ABC_US_EQ", shortName="ABC"),
+            MagicMock(ticker="ABC_GB_EQ", shortName="ABC"),
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="Ambiguous Trade212 instruments"):
+        adapter.place_market("ABC", signed_qty=1.0)
+
+
+def test_unavailable_symbol_fails_safely():
+    adapter, _, _, _ = _make_adapter_and_executor([], symbol_map={}, instruments=[])
+
+    with pytest.raises(RuntimeError, match="No Trade212 instrument found"):
+        adapter.place_market("SPY", signed_qty=1.0)
+
+
+def test_cash_cap_reduces_buy_quantity(tmp_path):
+    _, executor, fake_client, risk = _make_adapter_and_executor(
+        [], cash=1_000.0, tmp_path=tmp_path, symbol_map={"AAPL": "AAPL_US_EQ"}
+    )
+    from core.risk_manager import AccountSnapshot
+    risk.check_portfolio(AccountSnapshot(100_000.0, 1_000.0,
+                                          datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc)))
+
+    sig = Signal(symbol="AAPL", side="BUY", target_weight=0.5,
+                 confidence=0.9, regime="bull", reason="test")
+    acct = AccountInfo(equity=100_000.0, cash=1_000.0, invested=0.0,
+                       currency="USD", timestamp=datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc))
+
+    result = executor.submit(sig, acct, current_price=500.0)
+    assert result.placed
+    req = fake_client.orders.place_market.call_args.args[0]
+    assert req.quantity == 1.9
+
+
+def test_cash_cap_blocks_too_small_buy(tmp_path):
+    _, executor, fake_client, risk = _make_adapter_and_executor(
+        [], cash=10.0, tmp_path=tmp_path, symbol_map={"AAPL": "AAPL_US_EQ"}
+    )
+    from core.risk_manager import AccountSnapshot
+    risk.check_portfolio(AccountSnapshot(100_000.0, 10.0,
+                                          datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc)))
+
+    sig = Signal(symbol="AAPL", side="BUY", target_weight=0.5,
+                 confidence=0.9, regime="bull", reason="test")
+    acct = AccountInfo(equity=100_000.0, cash=10.0, invested=0.0,
+                       currency="USD", timestamp=datetime(2026, 5, 19, 14, 30, tzinfo=timezone.utc))
+
+    result = executor.submit(sig, acct, current_price=500.0)
+    assert not result.placed
+    assert "insufficient cash" in result.reason
+    fake_client.orders.place_market.assert_not_called()

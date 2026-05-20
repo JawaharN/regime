@@ -7,7 +7,7 @@ facade exposing the three endpoint groups the bot uses (account, positions,
 orders). `broker_adapter.BrokerAdapter` is the only consumer; it adds its own
 retry/backoff and demo-mode enforcement on top.
 
-Trade212 docs: https://t212public-api-docs.redocly.app/  (equity API, /api/v0).
+Trade212 docs: https://docs.trading212.com/api  (equity API, /api/v0).
 """
 
 from __future__ import annotations
@@ -118,12 +118,36 @@ class Order(BaseModel):
     type: str | None = None
 
 
+class ExchangeMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    name: str
+    workingSchedules: list[dict[str, Any]] = []
+
+
+class InstrumentMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ticker: str
+    name: str | None = None
+    shortName: str | None = None
+    isin: str | None = None
+    type: str | None = None
+    currencyCode: str | None = None
+    extendedHours: bool | None = None
+    maxOpenQuantity: float | None = None
+    addedOn: str | None = None
+    workingScheduleId: int | None = None
+
+
 class MarketOrderRequest(BaseModel):
     """Signed quantity: positive = BUY, negative = SELL (Trade212 convention)."""
 
     model_config = ConfigDict(extra="forbid")
     ticker: str
     quantity: float
+    extendedHours: bool = False
 
 
 class LimitOrderRequest(BaseModel):
@@ -241,6 +265,19 @@ class _OrdersEndpoint:
         self._http.request("DELETE", f"/equity/orders/{order_id}")
 
 
+class _MetadataEndpoint:
+    def __init__(self, http: _Http) -> None:
+        self._http = http
+
+    def exchanges(self) -> list[ExchangeMetadata]:
+        data = self._http.request("GET", "/equity/metadata/exchanges") or []
+        return [ExchangeMetadata.model_validate(d) for d in data]
+
+    def instruments(self) -> list[InstrumentMetadata]:
+        data = self._http.request("GET", "/equity/metadata/instruments") or []
+        return [InstrumentMetadata.model_validate(d) for d in data]
+
+
 # --------------------------------------------------------------- facade
 
 class Trade212Client:
@@ -251,6 +288,7 @@ class Trade212Client:
         self.account = _AccountEndpoint(self._http)
         self.positions = _PositionsEndpoint(self._http)
         self.orders = _OrdersEndpoint(self._http)
+        self.metadata = _MetadataEndpoint(self._http)
 
     def close(self) -> None:
         self._http.close()

@@ -51,6 +51,7 @@ class BrokerAdapter:
         self.symbol_map = symbol_map or {}
         self._t212_cfg = None
         self.client = None  # type: ignore[assignment]
+        self._instrument_cache: list[object] | None = None
 
     # ----------------------------------------------------- lifecycle
 
@@ -111,6 +112,53 @@ class BrokerAdapter:
         precision = getattr(self.broker_cfg, "quantity_precision", 1)
         factor = 10 ** max(0, precision)
         return int(qty * factor) / factor
+
+    def _metadata_instruments(self) -> list[object]:
+        if self.client is None:
+            raise RuntimeError("BrokerAdapter not connected")
+        if self._instrument_cache is None:
+            self._instrument_cache = self._retry(self.client.metadata.instruments)
+        return self._instrument_cache
+
+    def _to_t212_symbol(self, symbol: str) -> str:
+        manual = self.symbol_map.get(symbol)
+        if manual:
+            logger.info("resolved %s via symbol_map override -> %s", symbol, manual)
+            return manual
+
+        symbol_upper = symbol.upper()
+        exact_ticker_matches = []
+        short_name_matches = []
+        ticker_base_matches = []
+        for inst in self._metadata_instruments():
+            ticker = str(getattr(inst, "ticker", "") or "")
+            short_name = str(getattr(inst, "shortName", "") or "")
+            ticker_upper = ticker.upper()
+            if ticker_upper == symbol_upper:
+                exact_ticker_matches.append(ticker)
+                continue
+            if short_name.upper() == symbol_upper:
+                short_name_matches.append(ticker)
+                continue
+            ticker_base = ticker.split("_", 1)[0].upper()
+            if ticker_base == symbol_upper:
+                ticker_base_matches.append(ticker)
+
+        for matches in (exact_ticker_matches, short_name_matches, ticker_base_matches):
+            unique = sorted(set(m for m in matches if m))
+            if len(unique) == 1:
+                logger.info("resolved %s via Trade212 metadata -> %s", symbol, unique[0])
+                return unique[0]
+            if len(unique) > 1:
+                raise RuntimeError(
+                    f"Ambiguous Trade212 instruments for {symbol}: {', '.join(unique)}. "
+                    "Add universe.symbol_map override."
+                )
+
+        raise RuntimeError(
+            f"No Trade212 instrument found for {symbol}. Add universe.symbol_map "
+            "override or remove it from live trading."
+        )
 
     # ----------------------------------------------------- account / positions
 
@@ -190,19 +238,24 @@ class BrokerAdapter:
         if self.client is None:
             raise RuntimeError("BrokerAdapter not connected")
         from broker.trade212_api import MarketOrderRequest
-        t212_symbol = self.symbol_map.get(symbol, symbol)
+        t212_symbol = self._to_t212_symbol(symbol)
         qty = self.round_quantity(signed_qty)
-        req = MarketOrderRequest(ticker=t212_symbol, quantity=qty)
+        extended_hours = bool(getattr(self.broker_cfg, "market_extended_hours", True))
+        req = MarketOrderRequest(
+            ticker=t212_symbol,
+            quantity=qty,
+            extendedHours=extended_hours,
+        )
         order = self._retry(self.client.orders.place_market, req)
-        logger.info("placed market: symbol=%s qty=%s order_id=%s",
-                    t212_symbol, qty, getattr(order, "id", None))
+        logger.info("placed market: symbol=%s qty=%s extended_hours=%s order_id=%s",
+                    t212_symbol, qty, extended_hours, getattr(order, "id", None))
         return order
 
     def place_limit(self, symbol: str, signed_qty: float, limit_price: float):
         """Place a limit order if the client supports it; else fall back to market."""
         if self.client is None:
             raise RuntimeError("BrokerAdapter not connected")
-        t212_symbol = self.symbol_map.get(symbol, symbol)
+        t212_symbol = self._to_t212_symbol(symbol)
         try:
             from broker.trade212_api import LimitOrderRequest
             req = LimitOrderRequest(ticker=t212_symbol,

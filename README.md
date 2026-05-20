@@ -122,7 +122,11 @@ windows, broker settings, monitoring/logging.
 
 The entire Trade212 integration lives in `broker/`. `broker/trade212_api.py` is
 the wire client — authenticated httpx transport, rate-limit handling, typed
-order/account/position models, and a `Trade212Client` facade. `broker/broker_adapter.py`
-wraps it with retry/backoff and enforces demo-only (paper) operation. Trade212
-has no native OCO or trade-fill WebSocket — brackets are emulated and fills are
-detected by REST polling.
+order/account/position models, metadata discovery, and a `Trade212Client` facade.
+`broker/broker_adapter.py` wraps it with retry/backoff and enforces demo-only
+(paper) operation. Trade212 has no native OCO or trade-fill WebSocket — brackets
+are emulated and fills are detected by REST polling. API reference:
+https://docs.trading212.com/api . `universe.symbol_map` is now an explicit
+override/disambiguation layer; when a symbol is not listed there, the broker
+tries to resolve a unique Trade212 instrument ticker from the metadata catalog
+before placing the order.

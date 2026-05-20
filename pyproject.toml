@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regime_trader"
+version = "0.2.0"
+description = "HMM regime-based, paper-first trading framework (Trade212)"
+requires-python = ">=3.10"
+readme = "README.md"
+
+# Flat top-level layout: each subsystem is its own package.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "broker*", "data*", "monitoring*", "backtest*"]
+exclude = ["tests*", "logs*", "state*", "config*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]

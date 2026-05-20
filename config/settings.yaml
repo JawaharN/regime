@@ -1,0 +1,210 @@
+# regime_trader settings — HMM regime-based, paper-first trading (Trade212)
+# Every numeric the final build prompt prescribes lives here, grouped by subsystem.
+# Backward-compatible keys from the earlier draft are kept so older tooling/tests
+# keep working; new keys carry the final-prompt values.
+
+universe:
+  # 8-symbol default universe (final prompt). 8 large-cap equities.
+  symbols:
+    - AAPL
+    - MSFT
+    - AMZN
+    - GOOGL
+    - NVDA
+    - META
+    - TSLA
+    - AMD
+  # TradingView ↔ Trade212 ticker mapping (only needed where they differ).
+  symbol_map: {}
+  # Coarse sector buckets for the risk layer's 30% sector-exposure cap.
+  sectors:
+    AAPL: tech
+    MSFT: tech
+    AMZN: consumer
+    GOOGL: tech
+    NVDA: tech
+    META: tech
+    TSLA: consumer
+    AMD: tech
+
+bars:
+  # Daily cadence: the loop evaluates once per 1-Day bar close.
+  runtime_interval: "1d"
+  training_interval: "1d"
+  training_years: 6
+
+features:
+  # --- legacy windows (kept so FeatureSpec hashes stay reproducible) ---
+  return_window: 1
+  vol_window: 20
+  volume_zscore_window: 50
+  atr_window: 14
+  range_expansion_window: 10
+  # --- final 11+-feature set windows ---
+  ret_windows: [1, 5, 20]          # log returns over 1/5/20 bars
+  realized_vol_window: 20
+  vol_ratio_fast: 5
+  vol_ratio_slow: 20
+  volume_trend_window: 10
+  adx_window: 14
+  sma_slope_window: 50
+  sma_long_window: 200
+  rsi_window: 14
+  roc_windows: [10, 20]
+  # Rolling window every feature is z-scored over (causal). min_periods keeps
+  # early bars usable so short histories still train.
+  zscore_window: 252
+  zscore_min_periods: 60
+
+hmm:
+  # Pure-BIC model selection across these candidate state counts.
+  n_candidates: [3, 4, 5, 6, 7]
+  n_components_min: 3              # legacy mirror of min(n_candidates)
+  n_components_max: 7              # legacy mirror of max(n_candidates)
+  n_init: 10                       # random restarts per candidate
+  covariance_type: "full"
+  n_iter: 100
+  tol: 0.01
+  random_state: 42
+  validation_fraction: 0.2         # legacy; unused when bic_selection=true
+  bic_selection: true
+  min_train_bars: 252
+  min_confidence: 0.55             # below this → uncertainty mode
+  retrain_days: 7                  # retrain if model file older than this
+
+regime_labels:
+  # Worst → best. Labeling ranks states by mean return; labels are for humans.
+  names:
+    - crash
+    - bear
+    - neutral
+    - bull
+    - euphoria
+
+stability:
+  min_persistence_bars: 3          # a new regime must hold N bars to act on
+  flicker_window: 20
+  flicker_threshold: 4             # >N flips in window → unstable
+  unstable_confidence_decay: 0.5
+  transition_size_cut: 0.25        # size reduction while a change is unconfirmed
+
+allocation:
+  # Legacy regime→exposure table (still consumed by allocate() + old tests).
+  by_regime:
+    crash:
+      target_exposure: 0.0
+      leverage_cap: 1.0
+      requires_trend_confirmation: false
+    bear:
+      target_exposure: 0.2
+      leverage_cap: 1.0
+      requires_trend_confirmation: true
+    neutral:
+      target_exposure: 0.5
+      leverage_cap: 1.0
+      requires_trend_confirmation: true
+    bull:
+      target_exposure: 0.95
+      leverage_cap: 1.25
+      requires_trend_confirmation: false
+    euphoria:
+      target_exposure: 0.7
+      leverage_cap: 1.0
+      requires_trend_confirmation: false
+  confidence_floor: 0.5
+
+strategy:
+  trend_confirmation:
+    fast_sma: 50
+    slow_sma: 200
+  # --- final vol-tier strategy parameters ---
+  low_vol_allocation: 0.95
+  mid_vol_allocation_trend: 0.95
+  mid_vol_allocation_no_trend: 0.60
+  high_vol_allocation: 0.60
+  low_vol_leverage: 1.25
+  rebalance_threshold: 0.10        # only act when |target-current| weight > this
+  uncertainty_size_mult: 0.50      # halve sizes in uncertainty mode
+
+risk:
+  # --- legacy keys (consumed by check_portfolio/check_trade + old tests) ---
+  per_trade_risk_pct: 0.01
+  leverage_cap: 1.5
+  daily_drawdown_warn_pct: 0.02
+  daily_drawdown_halt_pct: 0.03
+  weekly_drawdown_warn_pct: 0.05
+  total_drawdown_kill_pct: 0.10
+  max_position_correlation: 0.85
+  kill_switch_path: "state/kill_switch.block"
+  peak_equity_path: "state/peak_equity.json"
+  # --- final-prompt risk parameters ---
+  max_risk_per_trade: 0.01
+  max_exposure: 0.80
+  max_leverage: 1.25
+  max_single_position: 0.15
+  max_sector_exposure: 0.30
+  max_concurrent: 5
+  max_daily_trades: 20
+  daily_dd_reduce: 0.02
+  daily_dd_halt: 0.03
+  weekly_dd_reduce: 0.05
+  weekly_dd_halt: 0.07
+  max_dd_from_peak: 0.10
+  gap_multiplier: 3.0
+  gap_risk_budget: 0.02
+  correlation_window: 60
+  correlation_reduce: 0.70
+  correlation_reject: 0.85
+  max_spread_pct: 0.005
+  duplicate_window_seconds: 60
+  min_position_value: 100.0
+  halt_lock_path: "state/trading_halted.lock"
+
+backtest:
+  # --- legacy keys ---
+  in_sample_days: 252
+  out_of_sample_days: 126
+  step_days: 126
+  slippage_bps: 5.0
+  commission_bps: 1.0
+  confidence_buckets: [0.0, 0.5, 0.6, 0.7, 1.0]
+  # --- final-prompt keys ---
+  slippage_pct: 0.0005
+  initial_capital: 100000.0
+  train_window: 252
+  test_window: 126
+  step_size: 126
+  risk_free_rate: 0.045
+  rebalance_threshold: 0.10
+  random_seeds: 100
+
+broker:
+  require_demo: true
+  paper_trading: true
+  poll_account_seconds: 30
+  poll_positions_seconds: 15
+  timeframe: "1Day"
+  order_type: "limit"              # default placement; falls back to market
+  limit_offset_pct: 0.001          # ±0.1% from last price
+  unfilled_cancel_seconds: 30
+  retry_attempts: 3
+  retry_backoff_seconds: 2.0
+
+dashboard:
+  refresh_seconds: 5
+  history_window_bars: 500
+
+monitoring:
+  dashboard_refresh_seconds: 5
+  alert_rate_limit_minutes: 15
+  log_dir: "logs"
+  log_max_bytes: 10485760          # 10 MB
+  log_backup_count: 30
+  state_dashboard_path: "state/dashboard.json"
+
+logging:
+  level: "INFO"
+  json: true
+  redact_env_keys:
+    - TRADING212_API_KEY
+    - TRADING212_SECRET_KEY

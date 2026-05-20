@@ -1,0 +1,26 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Local data + state — do not commit
+data/cache/
+state/trained_models/
+state/*.block
+state/peak_equity.json
+logs/
+*.parquet
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
